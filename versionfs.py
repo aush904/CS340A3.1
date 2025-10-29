@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import os, sys, stat, time, errno, glob, shutil, filecmp
 from fuse import FUSE, FuseOSError, Operations, LoggingMixIn
 
@@ -36,18 +36,14 @@ def rotate_versions(filename):
     if items:
         for n, p in reversed(items):
             if n == MAX_VERSIONS:
-                try:
-                    os.remove(p)
-                except:
-                    pass
+                try: os.remove(p)
+                except: pass
             else:
                 os.rename(p, vpath(filename, n + 1))
 
 def files_equal(a, b):
-    if not os.path.exists(a) or not os.path.exists(b):
-        return False
-    if os.path.getsize(a) != os.path.getsize(b):
-        return False
+    if not os.path.exists(a) or not os.path.exists(b): return False
+    if os.path.getsize(a) != os.path.getsize(b): return False
     return filecmp.cmp(a, b, shallow=False)
 
 class VersionFS(LoggingMixIn, Operations):
@@ -67,11 +63,9 @@ class VersionFS(LoggingMixIn, Operations):
         for p in glob.glob(os.path.join(VERSION_ROOT, '*.*')):
             base = os.path.basename(p)
             parts = base.split('.')
-            if len(parts) < 2:
-                continue
+            if len(parts) < 2: continue
             filename = '.'.join(parts[:-1])
-            if not is_visible_name(filename):
-                continue
+            if not is_visible_name(filename): continue
             if os.path.exists(vpath(filename, 1)):
                 names.add(filename)
         for e in sorted(names):
@@ -80,9 +74,9 @@ class VersionFS(LoggingMixIn, Operations):
     def getattr(self, path, fh=None):
         ensure_version_root()
         if path == '/':
-            now = int(time.time())
-            mode = stat.S_IFDIR | 0o755
-            return dict(st_mode=mode, st_nlink=2, st_size=0, st_ctime=now, st_mtime=now, st_atime=now)
+            now = time.time()
+            return dict(st_mode=(stat.S_IFDIR | 0o755), st_nlink=2,
+                        st_size=0, st_ctime=now, st_mtime=now, st_atime=now)
         name = logical_name(path)
         if not is_visible_name(name):
             raise FuseOSError(errno.ENOENT)
@@ -90,7 +84,9 @@ class VersionFS(LoggingMixIn, Operations):
         if not os.path.exists(backing):
             raise FuseOSError(errno.ENOENT)
         st = os.lstat(backing)
-        return dict(st_mode=stat.S_IFREG | 0o644, st_nlink=1, st_size=st.st_size, st_ctime=st.st_ctime, st_mtime=st.st_mtime, st_atime=st.st_atime)
+        return dict(st_mode=(stat.S_IFREG | 0o644), st_nlink=1,
+                    st_size=st.st_size, st_ctime=st.st_ctime,
+                    st_mtime=st.st_mtime, st_atime=st.st_atime)
 
     def open(self, path, flags):
         ensure_version_root()
@@ -98,8 +94,7 @@ class VersionFS(LoggingMixIn, Operations):
         p = vpath(name, 1)
         if not os.path.exists(p):
             raise FuseOSError(errno.ENOENT)
-        fd = os.open(p, flags)
-        return fd
+        return os.open(p, flags)
 
     def create(self, path, mode, fi=None):
         ensure_version_root()
@@ -110,32 +105,30 @@ class VersionFS(LoggingMixIn, Operations):
         if not os.path.exists(p):
             with open(p, 'wb'):
                 pass
-        fd = os.open(p, os.O_WRONLY)
-        return fd
+        return os.open(p, os.O_WRONLY)
 
-    def read(self, path, size, offset, fh):
+    def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)
-        return os.read(fh, size)
+        return os.read(fh, length)
 
     def _staging_path(self, name):
-        ensure_version_root()
         return os.path.join(VERSION_ROOT, f'.staging.{name}')
 
-    def write(self, path, data, offset, fh):
+    def write(self, path, buf, offset, fh):
         name = logical_name(path)
         sp = self.staging.get(name)
         if not sp:
             sp = self._staging_path(name)
             if os.path.exists(vpath(name, 1)):
-                shutil.copy2(vpath(name, 1), sp) if not os.path.exists(sp) else None
+                shutil.copy2(vpath(name, 1), sp)
             else:
                 with open(sp, 'wb'):
                     pass
             self.staging[name] = sp
         with open(sp, 'r+b') as f:
             f.seek(offset)
-            f.write(data)
-        return len(data)
+            f.write(buf)
+        return len(buf)
 
     def flush(self, path, fh):
         name = logical_name(path)
@@ -178,16 +171,12 @@ class VersionFS(LoggingMixIn, Operations):
     def unlink(self, path):
         name = logical_name(path)
         for _, p in existing_versions(name):
-            try:
-                os.remove(p)
-            except:
-                pass
+            try: os.remove(p)
+            except: pass
         sp = self.staging.get(name)
         if sp and os.path.exists(sp):
-            try:
-                os.remove(sp)
-            except:
-                pass
+            try: os.remove(sp)
+            except: pass
         self.staging.pop(name, None)
 
     def rename(self, old, new):
@@ -197,10 +186,10 @@ class VersionFS(LoggingMixIn, Operations):
             raise FuseOSError(errno.EPERM)
         for n, p in existing_versions(oldn):
             os.rename(p, vpath(newn, n))
-        osp = self.staging.get(oldn)
-        if osp and os.path.exists(osp):
+        sp = self.staging.get(oldn)
+        if sp and os.path.exists(sp):
             nsp = self._staging_path(newn)
-            os.rename(osp, nsp)
+            os.rename(sp, nsp)
             self.staging[newn] = nsp
             self.staging.pop(oldn, None)
 
@@ -211,7 +200,7 @@ class VersionFS(LoggingMixIn, Operations):
             os.utime(p, times)
 
 def main(mountpoint):
-    FUSE(VersionFS(), mountpoint, foreground=True, nothreads=True)
+    FUSE(VersionFS(), mountpoint, nothreads=True, foreground=True)
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
